@@ -7,6 +7,12 @@ const STORTRACK_PASSWORD = process.env.STORTRACK_PASSWORD || "";
 const MCP_BASE_URL = "https://mcp.wwgmcpserver.com";
 const MCP_API_KEY = process.env.WWG_MCP_API_KEY || "";
 
+// AWS S3 configuration for rate data export
+const AWS_S3_BUCKET = process.env.AWS_S3_BUCKET || "rca-rate-imports";
+const AWS_S3_REGION = process.env.AWS_S3_REGION || "us-west-1";
+const AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID || "";
+const AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY || "";
+
 // Error types for user-friendly messages
 interface FormattedError {
   message: string;
@@ -875,7 +881,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const daysBack = params.daysBack || 7;
 
           const latestRateSql = `
-            SELECT 
+            SELECT
               r.Store_ID,
               s.Name as Store_Name,
               s.Street_Address,
@@ -902,6 +908,149 @@ export async function registerRoutes(app: Express): Promise<Server> {
             ORDER BY r.Store_ID, r.Date_Collected DESC, r.Width, r.Length
           `;
           result = await universalQuery("Stortrack", latestRateSql);
+          break;
+        }
+
+        case "saveRatesToS3": {
+          // Upload API-fetched rates to S3 for later import by Python script
+          // This works around the read-only MCP API limitation
+          const rates = params.rates || [];
+          const metadata = params.metadata || {};
+
+          if (!Array.isArray(rates) || rates.length === 0) {
+            result = { uploaded: false, message: "No rates to save" };
+            break;
+          }
+
+          if (!AWS_ACCESS_KEY_ID || !AWS_SECRET_ACCESS_KEY) {
+            console.warn("AWS credentials not configured, skipping S3 upload");
+            result = { uploaded: false, message: "AWS credentials not configured" };
+            break;
+          }
+
+          console.log(`saveRatesToS3: Uploading ${rates.length} rate records to S3`);
+
+          try {
+            // Generate a unique filename with timestamp
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const filename = `rate-import-${timestamp}.json`;
+
+            // Prepare the payload in a format compatible with fill_missing_rates.py
+            const payload = {
+              exportedAt: new Date().toISOString(),
+              source: 'RCA App API Fetch',
+              metadata: {
+                subjectStoreId: metadata.subjectStoreId,
+                analysisId: metadata.analysisId,
+                userEmail: metadata.userEmail,
+                ...metadata
+              },
+              recordCount: rates.length,
+              rates: rates.map((rate: any) => ({
+                storeId: rate.storeId,
+                storeName: rate.storeName,
+                address: rate.address,
+                city: rate.city,
+                state: rate.state,
+                zip: rate.zip,
+                spacetype: rate.unitType || rate.spacetype || 'Standard',
+                size: rate.size,
+                width: rate.width || 0,
+                length: rate.length || 0,
+                height: rate.height || 0,
+                climateControlled: rate.climateControlled || false,
+                humidityControlled: rate.humidityControlled || false,
+                outdoorAccess: rate.outdoorAccess || false,
+                driveUp: rate.driveUp || false,
+                elevator: rate.elevator || false,
+                regularRate: rate.walkInPrice || rate.regularRate || null,
+                onlineRate: rate.onlinePrice || rate.onlineRate || null,
+                promo: rate.promo || '',
+                dateCollected: rate.date || rate.dateCollected || '',
+              }))
+            };
+
+            // Upload to S3 using AWS SDK v4 signature
+            const body = JSON.stringify(payload, null, 2);
+            const contentType = 'application/json';
+            const amzDate = new Date().toISOString().replace(/[:-]|\.\d{3}/g, '');
+            const dateStamp = amzDate.slice(0, 8);
+
+            // Create the canonical request for AWS Signature v4
+            const method = 'PUT';
+            const host = `${AWS_S3_BUCKET}.s3.${AWS_S3_REGION}.amazonaws.com`;
+            const canonicalUri = `/${filename}`;
+
+            // For simplicity, use a pre-signed URL approach via fetch
+            // Note: In production, use @aws-sdk/client-s3
+            const s3Url = `https://${host}${canonicalUri}`;
+
+            // Create authorization using AWS4 signature (simplified)
+            const crypto = await import('crypto');
+
+            const getSignatureKey = (key: string, dateStamp: string, regionName: string, serviceName: string) => {
+              const kDate = crypto.createHmac('sha256', 'AWS4' + key).update(dateStamp).digest();
+              const kRegion = crypto.createHmac('sha256', kDate).update(regionName).digest();
+              const kService = crypto.createHmac('sha256', kRegion).update(serviceName).digest();
+              const kSigning = crypto.createHmac('sha256', kService).update('aws4_request').digest();
+              return kSigning;
+            };
+
+            const payloadHash = crypto.createHash('sha256').update(body).digest('hex');
+
+            const canonicalHeaders = `content-type:${contentType}\nhost:${host}\nx-amz-content-sha256:${payloadHash}\nx-amz-date:${amzDate}\n`;
+            const signedHeaders = 'content-type;host;x-amz-content-sha256;x-amz-date';
+
+            const canonicalRequest = `${method}\n${canonicalUri}\n\n${canonicalHeaders}\n${signedHeaders}\n${payloadHash}`;
+            const canonicalRequestHash = crypto.createHash('sha256').update(canonicalRequest).digest('hex');
+
+            const algorithm = 'AWS4-HMAC-SHA256';
+            const credentialScope = `${dateStamp}/${AWS_S3_REGION}/s3/aws4_request`;
+            const stringToSign = `${algorithm}\n${amzDate}\n${credentialScope}\n${canonicalRequestHash}`;
+
+            const signingKey = getSignatureKey(AWS_SECRET_ACCESS_KEY, dateStamp, AWS_S3_REGION, 's3');
+            const signature = crypto.createHmac('sha256', signingKey).update(stringToSign).digest('hex');
+
+            const authorization = `${algorithm} Credential=${AWS_ACCESS_KEY_ID}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+
+            const response = await fetch(s3Url, {
+              method: 'PUT',
+              headers: {
+                'Content-Type': contentType,
+                'x-amz-content-sha256': payloadHash,
+                'x-amz-date': amzDate,
+                'Authorization': authorization,
+              },
+              body: body,
+            });
+
+            if (response.ok) {
+              console.log(`saveRatesToS3: Successfully uploaded ${filename} with ${rates.length} records`);
+              result = {
+                uploaded: true,
+                filename,
+                recordCount: rates.length,
+                s3Path: `s3://${AWS_S3_BUCKET}/${filename}`,
+                message: `Uploaded ${rates.length} rate records to S3 for database import`
+              };
+            } else {
+              const errorText = await response.text();
+              console.error(`saveRatesToS3: Upload failed - ${response.status}: ${errorText}`);
+              result = {
+                uploaded: false,
+                error: `S3 upload failed: ${response.status}`,
+                message: errorText
+              };
+            }
+          } catch (uploadError) {
+            const errorMsg = uploadError instanceof Error ? uploadError.message : String(uploadError);
+            console.error(`saveRatesToS3: Exception - ${errorMsg}`);
+            result = {
+              uploaded: false,
+              error: errorMsg,
+              message: `Failed to upload rates to S3: ${errorMsg}`
+            };
+          }
           break;
         }
 

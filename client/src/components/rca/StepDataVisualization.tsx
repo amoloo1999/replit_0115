@@ -1049,64 +1049,173 @@ export function StepDataVisualization({
               Outlier Analysis ({outliers.length} detected)
             </CardTitle>
             <CardDescription>
-              Review potential outliers in the rate data. Confirm to keep or exclude from analysis.
+              Review potential outliers in the rate data. Use bulk actions or review individually.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-3 max-h-64 overflow-y-auto">
-              {outliers.slice(0, 10).map((outlier, idx) => (
-                <div
-                  key={idx}
-                  className={`p-3 border rounded-lg flex items-center justify-between ${
-                    outlier.confirmed === true
-                      ? 'bg-green-50 border-green-200'
-                      : outlier.confirmed === false
-                      ? 'bg-red-50 border-red-200'
-                      : 'bg-amber-50 border-amber-200'
-                  }`}
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-sm truncate">
-                      {customNames[outlier.record.storeId] || outlier.record.storeName} - {outlier.record.size}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      {outlier.reason}
-                    </div>
-                  </div>
-                  <div className="flex gap-2 ml-4">
-                    {outlier.confirmed === null ? (
-                      <>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="text-green-700 border-green-300 hover:bg-green-100"
-                          onClick={() => handleOutlierDecision(idx, true)}
-                        >
-                          Keep
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="text-red-700 border-red-300 hover:bg-red-100"
-                          onClick={() => handleOutlierDecision(idx, false)}
-                        >
-                          Exclude
-                        </Button>
-                      </>
-                    ) : (
-                      <Badge variant={outlier.confirmed ? 'default' : 'destructive'}>
-                        {outlier.confirmed ? 'Keeping' : 'Excluding'}
-                      </Badge>
-                    )}
-                  </div>
+            {/* Summary Stats */}
+            <div className="grid grid-cols-4 gap-4 mb-4 p-3 bg-slate-50 rounded-lg">
+              <div className="text-center">
+                <div className="text-2xl font-bold text-amber-600">{outliers.length}</div>
+                <div className="text-xs text-muted-foreground">Total Outliers</div>
+              </div>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-red-600">
+                  {outliers.filter(o => o.deviation > 5).length}
                 </div>
-              ))}
-              {outliers.length > 10 && (
-                <p className="text-sm text-muted-foreground text-center">
-                  And {outliers.length - 10} more outliers...
-                </p>
-              )}
+                <div className="text-xs text-muted-foreground">Extreme (&gt;5σ)</div>
+              </div>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-green-600">
+                  {outliers.filter(o => o.confirmed === true).length}
+                </div>
+                <div className="text-xs text-muted-foreground">Keeping</div>
+              </div>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-slate-600">
+                  {outliers.filter(o => o.confirmed === false).length}
+                </div>
+                <div className="text-xs text-muted-foreground">Excluding</div>
+              </div>
             </div>
+
+            {/* Bulk Actions */}
+            <div className="flex flex-wrap gap-2 mb-4">
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-green-700 border-green-300 hover:bg-green-100"
+                onClick={() => {
+                  setOutliers(prev => prev.map(o => ({ ...o, confirmed: true })));
+                }}
+              >
+                Keep All
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-red-700 border-red-300 hover:bg-red-100"
+                onClick={() => {
+                  setOutliers(prev => prev.map(o => ({ ...o, confirmed: false })));
+                  setExcludedRecordIds(new Set(outliers.map(o => getRecordId(o.record))));
+                }}
+              >
+                Exclude All
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-amber-700 border-amber-300 hover:bg-amber-100"
+                onClick={() => {
+                  // Auto-exclude extreme outliers (>5 std devs), keep the rest
+                  setOutliers(prev => prev.map(o => ({
+                    ...o,
+                    confirmed: o.deviation <= 5 ? true : false
+                  })));
+                  const extremeIds = outliers.filter(o => o.deviation > 5).map(o => getRecordId(o.record));
+                  setExcludedRecordIds(new Set(extremeIds));
+                }}
+              >
+                Auto: Exclude Extreme Only
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setOutliers(prev => prev.map(o => ({ ...o, confirmed: null })));
+                  setExcludedRecordIds(new Set());
+                }}
+              >
+                Reset Decisions
+              </Button>
+            </div>
+
+            {/* Outlier Table */}
+            <div className="border rounded-lg overflow-hidden">
+              <div className="max-h-64 overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-100 sticky top-0">
+                    <tr>
+                      <th className="text-left p-2 font-medium">Store</th>
+                      <th className="text-left p-2 font-medium">Size</th>
+                      <th className="text-right p-2 font-medium">Price</th>
+                      <th className="text-right p-2 font-medium">Mean</th>
+                      <th className="text-right p-2 font-medium">Deviation</th>
+                      <th className="text-center p-2 font-medium">Decision</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {outliers.map((outlier, idx) => {
+                      const price = outlier.record.onlinePrice || outlier.record.walkInPrice || 0;
+                      const meanMatch = outlier.reason.match(/mean: \$(\d+)/);
+                      const mean = meanMatch ? parseInt(meanMatch[1]) : 0;
+
+                      return (
+                        <tr
+                          key={idx}
+                          className={`border-t ${
+                            outlier.confirmed === true
+                              ? 'bg-green-50'
+                              : outlier.confirmed === false
+                              ? 'bg-red-50'
+                              : outlier.deviation > 5
+                              ? 'bg-amber-50'
+                              : ''
+                          }`}
+                        >
+                          <td className="p-2 truncate max-w-[150px]" title={customNames[outlier.record.storeId] || outlier.record.storeName}>
+                            {customNames[outlier.record.storeId] || outlier.record.storeName}
+                          </td>
+                          <td className="p-2 font-mono">{outlier.record.size}</td>
+                          <td className="p-2 text-right font-mono font-medium">
+                            ${price.toFixed(0)}
+                          </td>
+                          <td className="p-2 text-right font-mono text-muted-foreground">
+                            ${mean}
+                          </td>
+                          <td className="p-2 text-right">
+                            <span className={`font-mono ${outlier.deviation > 5 ? 'text-red-600 font-bold' : 'text-amber-600'}`}>
+                              {outlier.deviation.toFixed(1)}σ
+                            </span>
+                          </td>
+                          <td className="p-2 text-center">
+                            {outlier.confirmed === null ? (
+                              <div className="flex gap-1 justify-center">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-6 px-2 text-green-700 hover:bg-green-100"
+                                  onClick={() => handleOutlierDecision(idx, true)}
+                                >
+                                  Keep
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-6 px-2 text-red-700 hover:bg-red-100"
+                                  onClick={() => handleOutlierDecision(idx, false)}
+                                >
+                                  Drop
+                                </Button>
+                              </div>
+                            ) : (
+                              <Badge
+                                variant={outlier.confirmed ? 'default' : 'destructive'}
+                                className="text-xs cursor-pointer"
+                                onClick={() => handleOutlierDecision(idx, !outlier.confirmed)}
+                              >
+                                {outlier.confirmed ? 'Keep' : 'Drop'}
+                              </Badge>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
             <div className="mt-4 flex justify-end">
               <Button
                 onClick={applyOutlierExclusions}

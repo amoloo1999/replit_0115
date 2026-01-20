@@ -19,6 +19,7 @@ import {
   getTrailing12MonthRates,
   getSalesforceMetadataByAddress,
   getSalesforceMatches,
+  saveRatesToS3,
 } from '@/lib/api';
 
 // Storage key for session persistence
@@ -416,6 +417,10 @@ export function useRCAWizard() {
         const actualDays = dates.length;
         const missingDays = Math.max(0, totalExpectedDays - actualDays);
 
+        // Cost is $12.50 per year of historical data needed
+        const yearsOfDataNeeded = missingDays / 365;
+        const estimatedCost = missingDays > 30 ? 12.5 * Math.ceil(yearsOfDataNeeded) : 0;
+
         return {
           storeId: store.storeId,
           storeName: store.storeName,
@@ -423,7 +428,7 @@ export function useRCAWizard() {
           coveragePercent: Math.round((actualDays / totalExpectedDays) * 100 * 10) / 10,
           dateRanges: [], // Would need more detailed analysis
           yearsNeeded: missingDays > 30 ? [2024, 2025] : [],
-          estimatedCost: missingDays > 30 ? 12.5 * Math.ceil(missingDays / 30) : 0,
+          estimatedCost,
         };
       });
 
@@ -514,24 +519,48 @@ export function useRCAWizard() {
     }
   }, [state.selectedStores]);
 
-  // Check if a record has conflicting amenities
-  const hasConflictingAmenities = (record: RateRecord): boolean => {
+  // Get the actual features from a record as a readable string
+  const getRecordFeatures = (record: RateRecord): string => {
+    const accessTypes: string[] = [];
+    if (record.driveUp) accessTypes.push('Drive-Up');
+    if (record.elevator) accessTypes.push('Elevator');
+    if (record.outdoorAccess) accessTypes.push('Outdoor');
+
+    const climateTypes: string[] = [];
+    if (record.climateControlled) climateTypes.push('Climate');
+    if (record.humidityControlled) climateTypes.push('Humidity');
+
+    const access = accessTypes.length > 0 ? accessTypes.join('+') : 'Ground';
+    const climate = climateTypes.length > 0 ? climateTypes.join('+') : 'Non-Climate';
+
+    return `${access} / ${climate}`;
+  };
+
+  // Check if a record has conflicting amenities and return details
+  const getConflictInfo = (record: RateRecord): { hasConflict: boolean; details: string } => {
     // Check for multiple access types (conflicting)
-    const accessTypes = [record.driveUp, record.elevator, record.outdoorAccess].filter(Boolean);
-    if (accessTypes.length > 1) return true;
+    const accessTypes: string[] = [];
+    if (record.driveUp) accessTypes.push('Drive-Up');
+    if (record.elevator) accessTypes.push('Elevator');
+    if (record.outdoorAccess) accessTypes.push('Outdoor');
 
-    // Check for conflicting climate settings
-    // Both climate controlled and explicitly non-climate is a conflict
-    // (humidityControlled is a subset, not a conflict)
+    if (accessTypes.length > 1) {
+      return {
+        hasConflict: true,
+        details: getRecordFeatures(record),
+      };
+    }
 
-    return false;
+    return { hasConflict: false, details: '' };
   };
 
   // Build a tag classification string from record features (matches RCA_script.py logic)
   const buildTagFromRecord = (record: RateRecord): string => {
-    // Check for conflicting amenities first
-    if (hasConflictingAmenities(record)) {
-      return 'CONFLICTING AMENITIES';
+    // Check for conflicting amenities first - but show actual features
+    const conflictInfo = getConflictInfo(record);
+    if (conflictInfo.hasConflict) {
+      // Show actual features so user can make an informed decision
+      return conflictInfo.details;
     }
 
     const parts: string[] = [];
@@ -568,9 +597,9 @@ export function useRCAWizard() {
   const suggestFeatureCode = (featureText: string): string => {
     if (!featureText) return 'UNKNOWN';
 
-    // Auto-code conflicting amenities as N/A for MR team review
-    if (featureText.toUpperCase().includes('CONFLICTING')) {
-      return 'N/A';
+    // Auto-code tags with multiple access types (e.g., "Drive-Up+Elevator") as Custom for user review
+    if (featureText.includes('+')) {
+      return 'Custom';
     }
 
     const lower = featureText.toLowerCase();
@@ -638,6 +667,26 @@ export function useRCAWizard() {
         return;
       }
 
+      // Auto-save API-fetched records to S3 for database import
+      // This runs in the background and doesn't block the export
+      if (allRecords.length > 0) {
+        saveRatesToS3({
+          rates: allRecords,
+          metadata: {
+            subjectStoreId: state.subjectStore?.storeId,
+            analysisId: `rca-${Date.now()}`,
+          }
+        }).then((result) => {
+          if (result.uploaded) {
+            console.log(`Auto-saved ${result.recordCount} records to S3: ${result.s3Path}`);
+          } else {
+            console.warn('Failed to auto-save to S3:', result.message);
+          }
+        }).catch((err) => {
+          console.warn('S3 auto-save error:', err);
+        });
+      }
+
       // Apply custom names
       const recordsWithNames = allRecords.map((record) => ({
         ...record,
@@ -697,7 +746,7 @@ export function useRCAWizard() {
       toast.error(message);
       setState((prev) => ({ ...prev, isLoading: false }));
     }
-  }, [state.selectedStores, state.customNames]);
+  }, [state.selectedStores, state.customNames, state.subjectStore]);
 
   // Download data dump CSV for editing
   const downloadDataDump = useCallback(() => {

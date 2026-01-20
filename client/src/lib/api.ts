@@ -275,3 +275,37 @@ export async function getStoreInfo(storeIds: number[]): Promise<Record<number, {
 }>> {
   return apiRequest('/api/database', { action: 'getStoreInfo', params: { storeIds } });
 }
+
+/**
+ * Save API-fetched rate records to S3 for later import to database.
+ * This is called automatically after fetching historical data from the StorTrack API.
+ */
+export async function saveRatesToS3(params: {
+  rates: RateRecord[];
+  metadata?: {
+    subjectStoreId?: number;
+    analysisId?: string;
+    userEmail?: string;
+  };
+}): Promise<{
+  uploaded: boolean;
+  filename?: string;
+  recordCount?: number;
+  s3Path?: string;
+  message: string;
+  error?: string;
+}> {
+  try {
+    return await apiRequest('/api/database', {
+      action: 'saveRatesToS3',
+      params
+    });
+  } catch (error) {
+    console.error('Failed to save rates to S3:', error);
+    return {
+      uploaded: false,
+      message: 'Failed to upload rates to S3',
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}

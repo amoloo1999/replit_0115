@@ -75,44 +75,70 @@ export function StepFeatureCodes({ featureCodes, onUpdate, onInitialize, onNext,
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {featureCodes.map((fc, index) => (
-              <div key={fc.originalTag} className="space-y-2 p-4 bg-muted/30 rounded-lg">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">Tag {index + 1}</span>
-                  <Badge variant="secondary">{fc.count} records</Badge>
+            {featureCodes.map((fc, index) => {
+              // Check if this tag has conflicting/multiple features (indicated by + in the tag)
+              const hasMultipleFeatures = fc.originalTag.includes('+');
+
+              return (
+                <div
+                  key={fc.originalTag}
+                  className={`space-y-2 p-4 rounded-lg ${
+                    hasMultipleFeatures
+                      ? 'bg-amber-50 border border-amber-200'
+                      : 'bg-muted/30'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">Tag {index + 1}</span>
+                      {hasMultipleFeatures && (
+                        <Badge variant="outline" className="text-amber-700 border-amber-300 bg-amber-100">
+                          Multiple Features
+                        </Badge>
+                      )}
+                    </div>
+                    <Badge variant="secondary">{fc.count.toLocaleString()} records</Badge>
+                  </div>
+                  <p className={`text-sm ${hasMultipleFeatures ? 'text-amber-800 font-medium' : 'text-muted-foreground'}`}>
+                    {fc.originalTag}
+                  </p>
+                  {hasMultipleFeatures && (
+                    <p className="text-xs text-amber-600">
+                      This tag has multiple access types. Please select the appropriate code for these records.
+                    </p>
+                  )}
+                  <div className="flex gap-2">
+                    <Select
+                      value={PRESET_CODES.some((p) => p.code === fc.code) ? fc.code : 'custom'}
+                      onValueChange={(value) => {
+                        if (value !== 'custom') {
+                          onUpdate(fc.originalTag, value);
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="w-48">
+                        <SelectValue placeholder="Select code" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PRESET_CODES.map(({ code, label }) => (
+                          <SelectItem key={code} value={code}>
+                            <span className="font-mono font-bold">{code}</span>
+                          </SelectItem>
+                        ))}
+                        <SelectItem value="custom">Custom...</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      value={fc.code}
+                      onChange={(e) => onUpdate(fc.originalTag, e.target.value.toUpperCase())}
+                      placeholder="Custom code"
+                      className="flex-1 font-mono uppercase"
+                      maxLength={10}
+                    />
+                  </div>
                 </div>
-                <p className="text-sm text-muted-foreground">{fc.originalTag}</p>
-                <div className="flex gap-2">
-                  <Select
-                    value={PRESET_CODES.some((p) => p.code === fc.code) ? fc.code : 'custom'}
-                    onValueChange={(value) => {
-                      if (value !== 'custom') {
-                        onUpdate(fc.originalTag, value);
-                      }
-                    }}
-                  >
-                    <SelectTrigger className="w-48">
-                      <SelectValue placeholder="Select code" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {PRESET_CODES.map(({ code, label }) => (
-                        <SelectItem key={code} value={code}>
-                          <span className="font-mono font-bold">{code}</span>
-                        </SelectItem>
-                      ))}
-                      <SelectItem value="custom">Custom...</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Input
-                    value={fc.code}
-                    onChange={(e) => onUpdate(fc.originalTag, e.target.value.toUpperCase())}
-                    placeholder="Custom code"
-                    className="flex-1 font-mono uppercase"
-                    maxLength={10}
-                  />
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </CardContent>
       </Card>
