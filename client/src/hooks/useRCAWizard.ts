@@ -309,6 +309,10 @@ export function useRCAWizard() {
       storeMetadata: metadata,
       storeRankings: rankings,
       customNames,
+      // Clear stale data from previous analysis when new stores are selected
+      dateGaps: [],
+      featureCodes: [],
+      rateRecords: [],
       isLoading: false,
     }));
 

@@ -1,4 +1,7 @@
-import { BarChart3, Building2 } from "lucide-react";
+import { useEffect, useCallback } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { BarChart3, RotateCcw } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { useRCAWizard, WIZARD_STEPS } from "@/hooks/useRCAWizard";
 import { WizardProgress } from "@/components/rca/WizardProgress";
 import { StepSearch } from "@/components/rca/StepSearch";
@@ -12,8 +15,66 @@ import { StepDataGaps } from "@/components/rca/StepDataGaps";
 import { StepFeatureCodes } from "@/components/rca/StepFeatureCodes";
 import { StepDataVisualization } from "@/components/rca/StepDataVisualization";
 
+// Map URL slugs to step numbers
+const STEP_ROUTES: Record<string, number> = {
+  'search': 1,
+  'subject-store': 2,
+  'competitors': 3,
+  'metadata': 4,
+  'rankings': 5,
+  'adjustments': 6,
+  'names': 7,
+  'data-gaps': 8,
+  'feature-codes': 9,
+  'data-visualization': 10,
+};
+
+// Reverse mapping: step numbers to URL slugs
+const STEP_SLUGS: Record<number, string> = Object.fromEntries(
+  Object.entries(STEP_ROUTES).map(([slug, num]) => [num, slug])
+);
+
 export default function RCAPage() {
+  const { step: urlStep } = useParams<{ step: string }>();
+  const navigate = useNavigate();
   const { state, actions } = useRCAWizard();
+
+  // Convert URL step to number
+  const urlStepNumber = urlStep ? STEP_ROUTES[urlStep] || 1 : 1;
+
+  // Sync URL with wizard state on mount and URL changes
+  useEffect(() => {
+    if (urlStepNumber !== state.currentStep) {
+      actions.setStep(urlStepNumber);
+    }
+  }, [urlStepNumber, actions.setStep]);
+
+  // Navigate to a step via URL
+  const navigateToStep = useCallback((stepNumber: number) => {
+    const slug = STEP_SLUGS[stepNumber] || 'search';
+    navigate(`/rca/${slug}`);
+  }, [navigate]);
+
+  // Override actions to use URL navigation
+  const nextStep = useCallback(() => {
+    const nextStepNum = Math.min(state.currentStep + 1, WIZARD_STEPS.length);
+    navigateToStep(nextStepNum);
+  }, [state.currentStep, navigateToStep]);
+
+  const prevStep = useCallback(() => {
+    const prevStepNum = Math.max(state.currentStep - 1, 1);
+    navigateToStep(prevStepNum);
+  }, [state.currentStep, navigateToStep]);
+
+  const setStep = useCallback((stepNumber: number) => {
+    navigateToStep(stepNumber);
+  }, [navigateToStep]);
+
+  // Start new analysis - clear state and go to search
+  const startNewAnalysis = useCallback(() => {
+    actions.resetWizard();
+    navigate('/rca/search');
+  }, [actions.resetWizard, navigate]);
 
   const renderStep = () => {
     switch (state.currentStep) {
@@ -24,7 +85,7 @@ export default function RCAPage() {
             onUpdate={actions.updateSearchCriteria}
             onSearch={async () => {
               await actions.searchStores();
-              actions.nextStep();
+              nextStep();
             }}
             isLoading={state.isLoading}
           />
@@ -37,7 +98,7 @@ export default function RCAPage() {
             onSelect={async (store) => {
               await actions.selectSubjectStore(store);
             }}
-            onNext={actions.nextStep}
+            onNext={nextStep}
             isLoading={state.isLoading}
           />
         );
@@ -47,8 +108,8 @@ export default function RCAPage() {
             subjectStore={state.subjectStore!}
             competitors={state.competitors}
             onSelect={actions.selectStoresForAnalysis}
-            onNext={actions.nextStep}
-            onBack={actions.prevStep}
+            onNext={nextStep}
+            onBack={prevStep}
             isLoading={state.isLoading}
           />
         );
@@ -58,8 +119,8 @@ export default function RCAPage() {
             stores={state.selectedStores}
             metadata={state.storeMetadata}
             onUpdate={actions.updateStoreMetadata}
-            onNext={actions.nextStep}
-            onBack={actions.prevStep}
+            onNext={nextStep}
+            onBack={prevStep}
             onFetchMatches={actions.fetchSalesforceMatchesForStore}
           />
         );
@@ -70,8 +131,8 @@ export default function RCAPage() {
             rankings={state.storeRankings}
             metadata={state.storeMetadata}
             onUpdate={actions.updateStoreRankings}
-            onNext={actions.nextStep}
-            onBack={actions.prevStep}
+            onNext={nextStep}
+            onBack={prevStep}
           />
         );
       case 6:
@@ -79,8 +140,8 @@ export default function RCAPage() {
           <StepAdjustments
             factors={state.adjustmentFactors}
             onUpdate={actions.updateAdjustmentFactors}
-            onNext={actions.nextStep}
-            onBack={actions.prevStep}
+            onNext={nextStep}
+            onBack={prevStep}
           />
         );
       case 7:
@@ -89,8 +150,8 @@ export default function RCAPage() {
             stores={state.selectedStores}
             customNames={state.customNames}
             onUpdate={actions.updateCustomName}
-            onNext={actions.nextStep}
-            onBack={actions.prevStep}
+            onNext={nextStep}
+            onBack={prevStep}
           />
         );
       case 8:
@@ -101,8 +162,8 @@ export default function RCAPage() {
             onSetApiStores={actions.setApiStoreIds}
             onAnalyze={actions.analyzeGaps}
             isLoading={state.isLoading}
-            onNext={actions.nextStep}
-            onBack={actions.prevStep}
+            onNext={nextStep}
+            onBack={prevStep}
           />
         );
       case 9:
@@ -111,8 +172,8 @@ export default function RCAPage() {
             featureCodes={state.featureCodes}
             onUpdate={actions.updateFeatureCode}
             onInitialize={actions.initializeFeatureCodes}
-            onNext={actions.nextStep}
-            onBack={actions.prevStep}
+            onNext={nextStep}
+            onBack={prevStep}
           />
         );
       case 10:
@@ -132,7 +193,7 @@ export default function RCAPage() {
             onExcludeRecords={actions.excludeRecords}
             onApplyStoreMultiplier={actions.applyStoreRateMultiplier}
             isLoading={state.isLoading}
-            onBack={actions.prevStep}
+            onBack={prevStep}
           />
         );
       default:
@@ -145,18 +206,29 @@ export default function RCAPage() {
       {/* Header */}
       <header className="border-b bg-card sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-primary/10">
-              <BarChart3 className="w-6 h-6 text-primary" />
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-primary/10">
+                <BarChart3 className="w-6 h-6 text-primary" />
+              </div>
+              <div>
+                <h1 className="text-xl font-semibold">
+                  Rate Comparison Analysis
+                </h1>
+                <p className="text-sm text-muted-foreground">
+                  Self-Storage Competitor Analysis Tool
+                </p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-xl font-semibold">
-                Rate Comparison Analysis
-              </h1>
-              <p className="text-sm text-muted-foreground">
-                Self-Storage Competitor Analysis Tool
-              </p>
-            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={startNewAnalysis}
+              className="flex items-center gap-2"
+            >
+              <RotateCcw className="w-4 h-4" />
+              New Analysis
+            </Button>
           </div>
         </div>
       </header>
@@ -167,7 +239,7 @@ export default function RCAPage() {
           <WizardProgress
             steps={WIZARD_STEPS}
             currentStep={state.currentStep}
-            onStepClick={actions.setStep}
+            onStepClick={setStep}
           />
         </div>
       </div>

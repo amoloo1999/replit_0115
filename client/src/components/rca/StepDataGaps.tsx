@@ -19,23 +19,21 @@ interface StepDataGapsProps {
   onBack: () => void;
 }
 
-export function StepDataGaps({ 
-  gaps, 
-  selectedApiStores, 
-  onSetApiStores, 
-  onAnalyze, 
-  isLoading, 
-  onNext, 
-  onBack 
+export function StepDataGaps({
+  gaps,
+  selectedApiStores,
+  onSetApiStores,
+  onAnalyze,
+  isLoading,
+  onNext,
+  onBack
 }: StepDataGapsProps) {
-  const [analyzed, setAnalyzed] = useState(false);
-
+  // Auto-analyze when entering this step with no gaps data
   useEffect(() => {
-    if (gaps.length === 0 && !analyzed) {
+    if (gaps.length === 0 && !isLoading) {
       onAnalyze();
-      setAnalyzed(true);
     }
-  }, [gaps.length, analyzed, onAnalyze]);
+  }, [gaps.length, isLoading, onAnalyze]);
 
   const storesWithGaps = gaps.filter((g) => g.missingDays > 0);
   const totalCost = storesWithGaps

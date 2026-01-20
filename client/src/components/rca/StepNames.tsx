@@ -49,7 +49,7 @@ export function StepNames({ stores, customNames, onUpdate, onNext, onBack }: Ste
                   <div className="flex items-center gap-2">
                     {isSubject && <Badge variant="default" className="shrink-0">Subject</Badge>}
                     {!isSubject && <Badge variant="outline" className="shrink-0">Comp {index}</Badge>}
-                    <span className="text-sm text-muted-foreground">Original: {store.storeName}</span>
+                    <span className="text-sm text-muted-foreground">Original: {store.storeName} ({store.address})</span>
                     {isModified && (
                       <Badge variant="secondary" className="ml-auto">Modified</Badge>
                     )}
