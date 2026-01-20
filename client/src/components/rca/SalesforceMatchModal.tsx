@@ -106,7 +106,7 @@ export function SalesforceMatchModal({
                           <div className="flex-1">
                             <div className="flex items-center gap-2 mb-1">
                               <span className="font-medium">{match.Name}</span>
-                              {index === 0 && (
+                              {index === 0 && match.addressScore >= 0.99 && (
                                 <Badge variant="secondary" className="text-xs">
                                   Best Match
                                 </Badge>

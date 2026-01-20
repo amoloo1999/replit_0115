@@ -597,9 +597,9 @@ export function useRCAWizard() {
   const suggestFeatureCode = (featureText: string): string => {
     if (!featureText) return 'UNKNOWN';
 
-    // Auto-code tags with multiple access types (e.g., "Drive-Up+Elevator") as Custom for user review
+    // Auto-code tags with multiple access types (e.g., "Drive-Up+Elevator") as NA for user review
     if (featureText.includes('+')) {
-      return 'Custom';
+      return 'NA';
     }
 
     const lower = featureText.toLowerCase();

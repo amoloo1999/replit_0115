@@ -581,7 +581,24 @@ async function getSalesforceMetadataByAddress(params: {
     }
   }
 
-  scoredMatches.sort((a, b) => b.combinedScore - a.combinedScore);
+  // Sort by address score first (100% address match should always be first),
+  // then by combined score for ties
+  scoredMatches.sort((a, b) => {
+    // If one has 100% address match and the other doesn't, prioritize the 100% match
+    const aHasPerfectAddress = a.addressScore >= 0.99;
+    const bHasPerfectAddress = b.addressScore >= 0.99;
+
+    if (aHasPerfectAddress && !bHasPerfectAddress) return -1;
+    if (bHasPerfectAddress && !aHasPerfectAddress) return 1;
+
+    // If both have perfect address or neither does, sort by address score first
+    if (a.addressScore !== b.addressScore) {
+      return b.addressScore - a.addressScore;
+    }
+
+    // If address scores are equal, use combined score as tiebreaker
+    return b.combinedScore - a.combinedScore;
+  });
 
   console.log(`Found ${scoredMatches.length} matching records for address`);
 
