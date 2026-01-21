@@ -610,22 +610,42 @@ export function useRCAWizard() {
   }, []);
 
   // Initialize feature codes from actual rate data
+  // Uses BOTH database records AND any API-fetched historical data
   const initializeFeatureCodes = useCallback(async () => {
     setState((prev) => ({ ...prev, isLoading: true }));
 
     try {
-      // Use the same database query that works for gap analysis
       const storeIds = state.selectedStores.map((s) => s.storeId);
+
+      // Start with any existing API-fetched records we already have
+      let allRecords: RateRecord[] = [...state.rateRecords];
+      console.log(`initializeFeatureCodes: Starting with ${allRecords.length} existing records (from API/previous fetches)`);
+
+      // Also fetch from database to ensure we have complete coverage
       const result = await getTrailing12MonthRates({ storeIds });
 
-      // Collect all records from all stores
-      const allRecords: RateRecord[] = [];
+      // Collect database records
+      const dbRecords: RateRecord[] = [];
       for (const storeId of storeIds) {
         const storeRecords = result.ratesByStore[storeId] || result.ratesByStore[String(storeId)] || [];
-        allRecords.push(...storeRecords);
+        dbRecords.push(...storeRecords);
+      }
+      console.log(`initializeFeatureCodes: Fetched ${dbRecords.length} records from database`);
+
+      // Merge: API records take precedence, add DB records that don't exist in API set
+      // Build a set of keys from existing records for deduplication
+      const existingKeys = new Set(allRecords.map((r) => `${r.storeId}-${r.size}-${r.date}`));
+
+      // Add DB records that aren't already in our set
+      for (const record of dbRecords) {
+        const key = `${record.storeId}-${record.size}-${record.date}`;
+        if (!existingKeys.has(key)) {
+          allRecords.push(record);
+          existingKeys.add(key);
+        }
       }
 
-      console.log(`initializeFeatureCodes: Found ${allRecords.length} total records`);
+      console.log(`initializeFeatureCodes: Total merged records: ${allRecords.length}`);
 
       // Extract unique tags and count occurrences
       // Build tag from features similar to RCA_script.py build_tag_from_db_fields
@@ -662,7 +682,7 @@ export function useRCAWizard() {
       }));
       toast.error('Failed to load feature codes');
     }
-  }, [state.selectedStores]);
+  }, [state.selectedStores, state.rateRecords]);
 
   // Get the actual features from a record as a readable string
   const getRecordFeatures = (record: RateRecord): string => {
