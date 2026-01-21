@@ -161,6 +161,7 @@ export default function RCAPage() {
             selectedApiStores={state.apiStoreIds}
             onSetApiStores={actions.setApiStoreIds}
             onAnalyze={actions.analyzeGaps}
+            onFillGaps={actions.fillDataGaps}
             isLoading={state.isLoading}
             onNext={nextStep}
             onBack={prevStep}

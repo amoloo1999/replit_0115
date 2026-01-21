@@ -421,9 +421,8 @@ export function useRCAWizard() {
         const actualDays = dates.length;
         const missingDays = Math.max(0, totalExpectedDays - actualDays);
 
-        // Cost is $12.50 per year of historical data needed
-        const yearsOfDataNeeded = missingDays / 365;
-        const estimatedCost = missingDays > 30 ? 12.5 * Math.ceil(yearsOfDataNeeded) : 0;
+        // Cost is $12.50 for a full year, prorated by missing days: (missingDays / 365) * 12.50
+        const estimatedCost = missingDays > 0 ? (missingDays / 365) * 12.5 : 0;
 
         return {
           storeId: store.storeId,
@@ -458,6 +457,148 @@ export function useRCAWizard() {
   const setApiStoreIds = useCallback((ids: number[]) => {
     setState((prev) => ({ ...prev, apiStoreIds: ids }));
   }, []);
+
+  // Fill data gaps by fetching historical data from StorTrack API
+  // This is the key function that calls the paid API to fill missing rate data
+  const fillDataGaps = useCallback(async (
+    onProgress?: (current: number, total: number, storeName: string) => void
+  ): Promise<{ success: boolean; recordsFetched: number; errors: string[] }> => {
+    const storeIdsToFetch = state.apiStoreIds;
+
+    if (storeIdsToFetch.length === 0) {
+      toast.error('No stores selected for API fetch');
+      return { success: false, recordsFetched: 0, errors: ['No stores selected'] };
+    }
+
+    setState((prev) => ({ ...prev, isLoading: true, error: null }));
+
+    const errors: string[] = [];
+    const allApiRecords: RateRecord[] = [];
+
+    // Calculate date range - trailing 12 months
+    const today = new Date();
+    const fromDate = new Date(today);
+    fromDate.setMonth(fromDate.getMonth() - 12);
+    const fromDateStr = fromDate.toISOString().split('T')[0];
+    const toDateStr = today.toISOString().split('T')[0];
+
+    console.log(`fillDataGaps: Fetching data for ${storeIdsToFetch.length} stores from ${fromDateStr} to ${toDateStr}`);
+
+    for (let i = 0; i < storeIdsToFetch.length; i++) {
+      const storeId = storeIdsToFetch[i];
+      const store = state.selectedStores.find((s: Store) => s.storeId === storeId);
+      const storeName = store?.storeName || `Store ${storeId}`;
+
+      // Report progress
+      if (onProgress) {
+        onProgress(i + 1, storeIdsToFetch.length, storeName);
+      }
+
+      try {
+        console.log(`fillDataGaps: Fetching historical data for store ${storeId} (${storeName})`);
+
+        const records = await fetchHistoricalData({
+          storeId,
+          fromDate: fromDateStr,
+          toDate: toDateStr,
+        });
+
+        console.log(`fillDataGaps: Got ${records.length} records for store ${storeId}`);
+
+        // Mark records as from API
+        const markedRecords = records.map((r) => ({
+          ...r,
+          source: 'API' as const,
+        }));
+
+        allApiRecords.push(...markedRecords);
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        console.error(`fillDataGaps: Error fetching store ${storeId}:`, errorMsg);
+        errors.push(`${storeName}: ${errorMsg}`);
+      }
+    }
+
+    console.log(`fillDataGaps: Total API records fetched: ${allApiRecords.length}`);
+
+    // Save API-fetched records to S3 for database import
+    if (allApiRecords.length > 0) {
+      try {
+        const s3Result = await saveRatesToS3({
+          rates: allApiRecords,
+          metadata: {
+            subjectStoreId: state.subjectStore?.storeId,
+            analysisId: `rca-gaps-${Date.now()}`,
+          },
+        });
+
+        if (s3Result.uploaded) {
+          console.log(`fillDataGaps: Saved ${s3Result.recordCount} records to S3: ${s3Result.s3Path}`);
+          toast.success(`Saved ${s3Result.recordCount} records to S3 for database import`);
+        } else {
+          console.warn('fillDataGaps: Failed to save to S3:', s3Result.message);
+        }
+      } catch (s3Error) {
+        console.warn('fillDataGaps: S3 save error:', s3Error);
+      }
+    }
+
+    // Merge API records with existing DB records
+    // Get existing DB records and add new API records
+    const existingRecords = state.rateRecords.filter((r: RateRecord) => r.source === 'Database');
+    const mergedRecords = [...existingRecords, ...allApiRecords];
+
+    // Remove duplicates (same store, size, date)
+    const uniqueRecords: RateRecord[] = [];
+    const seenKeys = new Set<string>();
+
+    for (const record of mergedRecords) {
+      const key = `${record.storeId}-${record.size}-${record.date}`;
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        uniqueRecords.push(record);
+      }
+    }
+
+    // Update state with merged records and clear the gaps for fetched stores
+    setState((prev) => {
+      // Update gaps - mark fetched stores as having 0 missing days
+      const updatedGaps = prev.dateGaps.map((gap: DateGap) => {
+        if (storeIdsToFetch.includes(gap.storeId)) {
+          return {
+            ...gap,
+            missingDays: 0,
+            coveragePercent: 100,
+            dateRanges: [],
+          };
+        }
+        return gap;
+      });
+
+      return {
+        ...prev,
+        isLoading: false,
+        rateRecords: uniqueRecords,
+        dateGaps: updatedGaps,
+        apiStoreIds: [], // Clear selection after fetch
+        error: errors.length > 0 ? `Completed with ${errors.length} errors` : null,
+      };
+    });
+
+    if (allApiRecords.length > 0) {
+      toast.success(`Fetched ${allApiRecords.length} records from StorTrack API`);
+    }
+
+    if (errors.length > 0) {
+      toast.warning(`${errors.length} store(s) had errors during fetch`);
+    }
+
+    return {
+      success: errors.length === 0,
+      recordsFetched: allApiRecords.length,
+      errors,
+    };
+  }, [state.apiStoreIds, state.selectedStores, state.rateRecords, state.subjectStore, state.dateGaps]);
 
   const updateFeatureCode = useCallback((tag: string, code: string) => {
     setState((prev) => ({
@@ -894,6 +1035,7 @@ export function useRCAWizard() {
       updateCustomName,
       analyzeGaps,
       setApiStoreIds,
+      fillDataGaps,
       updateFeatureCode,
       initializeFeatureCodes,
       exportCSV,

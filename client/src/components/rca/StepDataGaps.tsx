@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Database, AlertTriangle, Check, DollarSign, Loader2 } from 'lucide-react';
+import { Database, AlertTriangle, Check, DollarSign, Loader2, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -14,9 +14,16 @@ interface StepDataGapsProps {
   selectedApiStores: number[];
   onSetApiStores: (ids: number[]) => void;
   onAnalyze: () => void;
+  onFillGaps: (onProgress?: (current: number, total: number, storeName: string) => void) => Promise<{ success: boolean; recordsFetched: number; errors: string[] }>;
   isLoading: boolean;
   onNext: () => void;
   onBack: () => void;
+}
+
+interface FetchProgress {
+  current: number;
+  total: number;
+  storeName: string;
 }
 
 export function StepDataGaps({
@@ -24,16 +31,21 @@ export function StepDataGaps({
   selectedApiStores,
   onSetApiStores,
   onAnalyze,
+  onFillGaps,
   isLoading,
   onNext,
   onBack
 }: StepDataGapsProps) {
+  const [isFetching, setIsFetching] = useState(false);
+  const [fetchProgress, setFetchProgress] = useState<FetchProgress | null>(null);
+  const [fetchResult, setFetchResult] = useState<{ recordsFetched: number; errors: string[] } | null>(null);
+
   // Auto-analyze when entering this step with no gaps data
   useEffect(() => {
-    if (gaps.length === 0 && !isLoading) {
+    if (gaps.length === 0 && !isLoading && !isFetching) {
       onAnalyze();
     }
-  }, [gaps.length, isLoading, onAnalyze]);
+  }, [gaps.length, isLoading, isFetching, onAnalyze]);
 
   const storesWithGaps = gaps.filter((g) => g.missingDays > 0);
   const totalCost = storesWithGaps
@@ -56,13 +68,78 @@ export function StepDataGaps({
     onSetApiStores([]);
   };
 
-  if (isLoading) {
+  const handleFillGaps = async () => {
+    if (selectedApiStores.length === 0) return;
+
+    // Confirm with user about cost
+    const confirmed = window.confirm(
+      `You are about to fetch historical data from the StorTrack API for ${selectedApiStores.length} store(s).\n\n` +
+      `Estimated cost: $${totalCost.toFixed(2)}\n\n` +
+      `This will incur API charges. Continue?`
+    );
+
+    if (!confirmed) return;
+
+    setIsFetching(true);
+    setFetchProgress(null);
+    setFetchResult(null);
+
+    try {
+      const result = await onFillGaps((current, total, storeName) => {
+        setFetchProgress({ current, total, storeName });
+      });
+
+      setFetchResult({
+        recordsFetched: result.recordsFetched,
+        errors: result.errors,
+      });
+    } catch (error) {
+      console.error('Fill gaps error:', error);
+      setFetchResult({
+        recordsFetched: 0,
+        errors: [error instanceof Error ? error.message : 'Unknown error'],
+      });
+    } finally {
+      setIsFetching(false);
+      setFetchProgress(null);
+    }
+  };
+
+  if (isLoading && !isFetching) {
     return (
       <div className="max-w-3xl mx-auto animate-fade-in">
         <Card className="p-12">
           <div className="flex flex-col items-center gap-4">
             <Loader2 className="w-8 h-8 animate-spin text-primary" />
             <p className="text-muted-foreground">Analyzing database coverage...</p>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (isFetching) {
+    return (
+      <div className="max-w-3xl mx-auto animate-fade-in">
+        <Card className="p-12">
+          <div className="flex flex-col items-center gap-4">
+            <Loader2 className="w-8 h-8 animate-spin text-primary" />
+            <p className="text-lg font-medium">Fetching Historical Data from StorTrack API</p>
+            {fetchProgress && (
+              <>
+                <p className="text-muted-foreground">
+                  Processing store {fetchProgress.current} of {fetchProgress.total}
+                </p>
+                <p className="text-sm text-muted-foreground">{fetchProgress.storeName}</p>
+                <Progress
+                  value={(fetchProgress.current / fetchProgress.total) * 100}
+                  className="w-full max-w-md h-2"
+                />
+              </>
+            )}
+            <p className="text-xs text-muted-foreground mt-4">
+              This may take a few minutes depending on the number of stores...
+            </p>
           </div>
         </Card>
       </div>
@@ -78,13 +155,44 @@ export function StepDataGaps({
         </p>
       </div>
 
+      {fetchResult && (
+        <Alert className={cn(
+          "mb-6",
+          fetchResult.errors.length === 0
+            ? "border-success/50 bg-success/10"
+            : "border-warning/50 bg-warning/10"
+        )}>
+          {fetchResult.errors.length === 0 ? (
+            <Check className="h-4 w-4 text-success" />
+          ) : (
+            <AlertTriangle className="h-4 w-4 text-warning" />
+          )}
+          <AlertTitle>
+            {fetchResult.errors.length === 0 ? 'API Fetch Complete' : 'API Fetch Completed with Errors'}
+          </AlertTitle>
+          <AlertDescription>
+            <p>Fetched {fetchResult.recordsFetched} records from StorTrack API.</p>
+            {fetchResult.errors.length > 0 && (
+              <div className="mt-2">
+                <p className="font-medium">Errors:</p>
+                <ul className="list-disc list-inside text-sm">
+                  {fetchResult.errors.map((err, i) => (
+                    <li key={i}>{err}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
+
       <div className="space-y-4">
         {gaps.map((gap) => {
           const hasGaps = gap.missingDays > 0;
           const isSelected = selectedApiStores.includes(gap.storeId);
-          
+
           return (
-            <Card 
+            <Card
               key={gap.storeId}
               className={cn(
                 hasGaps && isSelected && 'ring-2 ring-primary'
@@ -104,7 +212,7 @@ export function StepDataGaps({
                       <Check className="w-3 h-3 text-success-foreground" />
                     </div>
                   )}
-                  
+
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-2">
                       <h3 className="font-medium">{gap.storeName}</h3>
@@ -112,14 +220,14 @@ export function StepDataGaps({
                         ID: {gap.storeId}
                       </Badge>
                     </div>
-                    
+
                     <div className="space-y-2">
                       <div className="flex items-center gap-2">
                         <span className="text-sm text-muted-foreground">Coverage:</span>
                         <Progress value={gap.coveragePercent} className="flex-1 h-2" />
                         <span className="text-sm font-mono w-16 text-right">{gap.coveragePercent}%</span>
                       </div>
-                      
+
                       {hasGaps ? (
                         <div className="text-sm text-muted-foreground">
                           <span className="text-warning">{gap.missingDays} days</span> missing
@@ -175,6 +283,20 @@ export function StepDataGaps({
               </Button>
             </div>
           </div>
+
+          {selectedApiStores.length > 0 && (
+            <div className="mt-4 flex justify-center">
+              <Button
+                onClick={handleFillGaps}
+                disabled={isFetching}
+                className="gap-2"
+                size="lg"
+              >
+                <Download className="w-4 h-4" />
+                Fill Gaps with StorTrack API (${totalCost.toFixed(2)})
+              </Button>
+            </div>
+          )}
         </>
       )}
 
