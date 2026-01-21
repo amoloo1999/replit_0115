@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { Tag, Info } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Tag, Info, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -22,18 +22,43 @@ const PRESET_CODES = [
 
 interface StepFeatureCodesProps {
   featureCodes: FeatureCode[];
+  rateRecordCount?: number;
   onUpdate: (tag: string, code: string) => void;
   onInitialize: () => void;
   onNext: () => void;
   onBack: () => void;
 }
 
-export function StepFeatureCodes({ featureCodes, onUpdate, onInitialize, onNext, onBack }: StepFeatureCodesProps) {
+export function StepFeatureCodes({ featureCodes, rateRecordCount = 0, onUpdate, onInitialize, onNext, onBack }: StepFeatureCodesProps) {
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastRecordCount, setLastRecordCount] = useState(0);
+
+  // Initialize on first mount or when no feature codes exist
   useEffect(() => {
     if (featureCodes.length === 0) {
       onInitialize();
     }
   }, [featureCodes.length, onInitialize]);
+
+  // Track rate record count and auto-refresh if it changed significantly
+  // This happens when user fills data gaps and returns to this page
+  useEffect(() => {
+    if (rateRecordCount > 0 && lastRecordCount > 0 && rateRecordCount !== lastRecordCount) {
+      // Records changed (likely from API fetch), refresh feature codes
+      console.log(`Rate records changed from ${lastRecordCount} to ${rateRecordCount}, refreshing feature codes`);
+      onInitialize();
+    }
+    setLastRecordCount(rateRecordCount);
+  }, [rateRecordCount, lastRecordCount, onInitialize]);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await onInitialize();
+    setIsRefreshing(false);
+  };
+
+  // Calculate total records from feature codes
+  const totalRecords = featureCodes.reduce((sum, fc) => sum + fc.count, 0);
 
   return (
     <div className="max-w-3xl mx-auto animate-fade-in">
@@ -42,6 +67,23 @@ export function StepFeatureCodes({ featureCodes, onUpdate, onInitialize, onNext,
         <p className="text-muted-foreground">
           Assign codes to each unique unit classification for the CSV export
         </p>
+        {totalRecords > 0 && (
+          <div className="mt-2 flex items-center justify-center gap-2">
+            <Badge variant="secondary" className="text-sm">
+              {totalRecords.toLocaleString()} total rate records
+            </Badge>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className="h-7 px-2"
+            >
+              <RefreshCw className={`w-3 h-3 mr-1 ${isRefreshing ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+          </div>
+        )}
       </div>
 
       <Card className="mb-6">

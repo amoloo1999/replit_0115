@@ -171,6 +171,7 @@ export default function RCAPage() {
         return (
           <StepFeatureCodes
             featureCodes={state.featureCodes}
+            rateRecordCount={state.rateRecords.length}
             onUpdate={actions.updateFeatureCode}
             onInitialize={actions.initializeFeatureCodes}
             onNext={nextStep}
