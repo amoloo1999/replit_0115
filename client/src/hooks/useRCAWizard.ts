@@ -548,12 +548,16 @@ export function useRCAWizard() {
     const existingRecords = state.rateRecords.filter((r: RateRecord) => r.source === 'Database');
     const mergedRecords = [...existingRecords, ...allApiRecords];
 
-    // Remove duplicates (same store, size, date)
+    // Remove duplicates (same store, size, date, AND feature flags)
+    // Key must include features to distinguish different unit types with same size
+    const buildRecordKey = (r: RateRecord) =>
+      `${r.storeId}-${r.size}-${r.date}-${r.climateControlled ? 'CC' : 'NCC'}-${r.driveUp ? 'DU' : ''}-${r.elevator ? 'E' : ''}-${r.outdoorAccess ? 'O' : ''}`;
+
     const uniqueRecords: RateRecord[] = [];
     const seenKeys = new Set<string>();
 
     for (const record of mergedRecords) {
-      const key = `${record.storeId}-${record.size}-${record.date}`;
+      const key = buildRecordKey(record);
       if (!seenKeys.has(key)) {
         seenKeys.add(key);
         uniqueRecords.push(record);
@@ -634,11 +638,15 @@ export function useRCAWizard() {
 
       // Merge: API records take precedence, add DB records that don't exist in API set
       // Build a set of keys from existing records for deduplication
-      const existingKeys = new Set(allRecords.map((r) => `${r.storeId}-${r.size}-${r.date}`));
+      // Key includes: storeId, size, date, AND feature flags to distinguish different unit types
+      const buildRecordKey = (r: RateRecord) =>
+        `${r.storeId}-${r.size}-${r.date}-${r.climateControlled ? 'CC' : 'NCC'}-${r.driveUp ? 'DU' : ''}-${r.elevator ? 'E' : ''}-${r.outdoorAccess ? 'O' : ''}`;
+
+      const existingKeys = new Set(allRecords.map(buildRecordKey));
 
       // Add DB records that aren't already in our set
       for (const record of dbRecords) {
-        const key = `${record.storeId}-${record.size}-${record.date}`;
+        const key = buildRecordKey(record);
         if (!existingKeys.has(key)) {
           allRecords.push(record);
           existingKeys.add(key);
