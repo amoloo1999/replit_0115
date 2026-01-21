@@ -934,16 +934,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const rates = params.rates || [];
           const metadata = params.metadata || {};
 
+          console.log(`saveRatesToS3: Received ${rates.length} rates to save`);
+
           if (!Array.isArray(rates) || rates.length === 0) {
+            console.warn("saveRatesToS3: No rates provided or empty array");
             result = { uploaded: false, message: "No rates to save" };
             break;
           }
 
           if (!AWS_ACCESS_KEY_ID || !AWS_SECRET_ACCESS_KEY) {
-            console.warn("AWS credentials not configured, skipping S3 upload");
+            console.warn("saveRatesToS3: AWS credentials not configured - AWS_ACCESS_KEY_ID:", !!AWS_ACCESS_KEY_ID, "AWS_SECRET_ACCESS_KEY:", !!AWS_SECRET_ACCESS_KEY);
             result = { uploaded: false, message: "AWS credentials not configured" };
             break;
           }
+
+          console.log(`saveRatesToS3: AWS credentials configured, bucket: ${AWS_S3_BUCKET}, region: ${AWS_S3_REGION}`);
 
           console.log(`saveRatesToS3: Uploading ${rates.length} rate records to S3`);
 

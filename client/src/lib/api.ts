@@ -127,33 +127,75 @@ export async function fetchHistoricalData(params: {
   const records: RateRecord[] = [];
 
   for (const storeData of data) {
-    const rates = storeData.rates || storeData.rateinfo || [];
-    for (const rate of rates) {
-      records.push({
-        storeId: params.storeId,
-        storeName: storeData.storename || '',
-        address: storeData.address || '',
-        city: storeData.city || '',
-        state: storeData.state || '',
-        zip: storeData.zip || '',
-        unitType: rate.spacetype || rate.unittype || '',
-        size: rate.size || rate.unitsize || '',
-        width: rate.width,
-        length: rate.length,
-        height: rate.height,
-        features: rate.features || '',
-        tag: rate.tag || rate.spacetype || '',
-        climateControlled: rate.climate_controlled || rate.cc || false,
-        humidityControlled: rate.humidity_controlled || false,
-        driveUp: rate.drive_up || rate.driveup || false,
-        elevator: rate.elevator || false,
-        outdoorAccess: rate.outdoor_access || false,
-        walkInPrice: rate.regular_rate || rate.regularrate || rate.rate,
-        onlinePrice: rate.online_rate || rate.onlinerate,
-        date: rate.date_collected || rate.datecollected || rate.date || '',
-        promo: rate.promo || rate.promotion || '',
-        source: 'API' as const,
-      });
+    // StorTrack API returns: storeID, storeName, address, city, state, zipcode
+    // with unitType array containing: type, size, feature, price[]
+    // price array contains: date, regular, online, promo
+    const storeId = storeData.storeID || storeData.storeid || params.storeId;
+    const storeName = storeData.storeName || storeData.storename || '';
+    const address = storeData.address || '';
+    const city = storeData.city || '';
+    const state = storeData.state || '';
+    const zip = storeData.zipcode || storeData.zip || '';
+
+    // Parse unitType array (StorTrack API structure)
+    const unitTypes = storeData.unitType || storeData.unittype || [];
+
+    for (const unit of unitTypes) {
+      const unitType = unit.type || '';
+      const sizeStr = unit.size || '';
+      const featureText = unit.feature || '';
+
+      // Parse size string (e.g., "10x10", "5x5x8")
+      let width: number | undefined;
+      let length: number | undefined;
+      let height: number | undefined;
+      const sizeMatch = sizeStr.match(/(\d+(?:\.\d+)?)\s*[xX]\s*(\d+(?:\.\d+)?)(?:\s*[xX]\s*(\d+(?:\.\d+)?))?/);
+      if (sizeMatch) {
+        width = parseFloat(sizeMatch[1]);
+        length = parseFloat(sizeMatch[2]);
+        if (sizeMatch[3]) {
+          height = parseFloat(sizeMatch[3]);
+        }
+      }
+
+      // Parse feature text into binary flags
+      const featureLower = (featureText || '').toLowerCase();
+      const climateControlled = featureLower.includes('climate') || featureLower.includes('cc');
+      const humidityControlled = featureLower.includes('humidity');
+      const driveUp = featureLower.includes('drive');
+      const elevator = featureLower.includes('elevator');
+      const outdoorAccess = featureLower.includes('outdoor');
+
+      // Parse price array
+      const prices = unit.price || [];
+
+      for (const price of prices) {
+        records.push({
+          storeId,
+          storeName,
+          address,
+          city,
+          state,
+          zip,
+          unitType,
+          size: sizeStr,
+          width,
+          length,
+          height,
+          features: featureText,
+          tag: unitType,
+          climateControlled,
+          humidityControlled,
+          driveUp,
+          elevator,
+          outdoorAccess,
+          walkInPrice: price.regular,
+          onlinePrice: price.online,
+          date: price.date || '',
+          promo: price.promo || '',
+          source: 'API' as const,
+        });
+      }
     }
   }
 
