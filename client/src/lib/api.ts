@@ -178,12 +178,9 @@ export async function fetchHistoricalData(params: {
         combinedText.includes('exterior') ||
         (combinedText.includes('outside') && !combinedText.includes('inside'));
 
-      // Filter out lockers, parking, and other non-standard unit types
+      // Filter out lockers, parking, and other non-standard unit types (only check unitType)
       const excludedTerms = ['locker', 'parking', 'wine', 'vehicle', 'rv', 'boat', 'trailer', 'car'];
-      const sizeLower = sizeStr.toLowerCase();
-      const isExcluded = excludedTerms.some(
-        (term) => combinedText.includes(term) || sizeLower.includes(term)
-      );
+      const isExcluded = excludedTerms.some((term) => unitTypeLower.includes(term));
 
       if (isExcluded) {
         continue; // Skip this unit type

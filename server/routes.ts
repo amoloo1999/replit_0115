@@ -813,12 +813,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
             // Determine outdoor access from multiple sources
             const outdoorAccess = !!row.Outdoor_Access || hasExteriorInSpacetype;
 
-            // Filter out lockers, parking, and other non-standard unit types
+            // Filter out lockers, parking, and other non-standard unit types (only check unitType/Spacetype)
             const excludedTerms = ['locker', 'parking', 'wine', 'vehicle', 'rv', 'boat', 'trailer', 'car'];
-            const sizeLower = (row.Size || "").toLowerCase();
-            const isExcluded = excludedTerms.some(
-              (term) => spacetypeLower.includes(term) || sizeLower.includes(term)
-            );
+            const unitTypeLower = spacetypeLower; // Spacetype is the unitType field in MCP data
+            const isExcluded = excludedTerms.some((term) => unitTypeLower.includes(term));
 
             if (isExcluded) {
               continue; // Skip this record

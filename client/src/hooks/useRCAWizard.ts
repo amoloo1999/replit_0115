@@ -661,20 +661,13 @@ export function useRCAWizard() {
 
       console.log(`initializeFeatureCodes: Total merged records before filtering: ${allRecords.length}`);
 
-      // Filter out lockers, parking, and other non-standard unit types
+      // Filter out lockers, parking, and other non-standard unit types (only check unitType)
       const excludedUnitTypes = ['locker', 'parking', 'wine', 'vehicle', 'rv', 'boat', 'trailer', 'car'];
       const filteredRecords = allRecords.filter((record) => {
         const unitTypeLower = (record.unitType || '').toLowerCase();
-        const sizeLower = (record.size || '').toLowerCase();
-        const featuresLower = (record.features || '').toLowerCase();
 
-        // Check if any excluded term appears in unitType, size, or features
-        const isExcluded = excludedUnitTypes.some(
-          (term) =>
-            unitTypeLower.includes(term) ||
-            sizeLower.includes(term) ||
-            featuresLower.includes(term)
-        );
+        // Check if any excluded term appears in unitType only
+        const isExcluded = excludedUnitTypes.some((term) => unitTypeLower.includes(term));
 
         return !isExcluded;
       });
