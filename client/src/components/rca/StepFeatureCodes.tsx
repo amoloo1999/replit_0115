@@ -8,16 +8,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import type { FeatureCode } from '@/types/rca';
 
 const PRESET_CODES = [
-  { code: 'GLCC', label: 'Ground Level Climate Controlled' },
-  { code: 'GNCC', label: 'Ground Level Non-Climate Controlled' },
-  { code: 'ECC', label: 'Elevator Climate Controlled' },
-  { code: 'ENCC', label: 'Elevator Non-Climate Controlled' },
   { code: 'DUCC', label: 'Drive-Up Climate Controlled' },
   { code: 'DU', label: 'Drive-Up (Non-Climate)' },
-  { code: 'ICC', label: 'Interior Climate Controlled' },
-  { code: 'INCC', label: 'Interior Non-Climate Controlled' },
-  { code: 'CC', label: 'Climate Controlled (generic)' },
-  { code: 'NCC', label: 'Non-Climate Controlled (generic)' },
+  { code: 'ECC', label: 'Elevator Climate Controlled' },
+  { code: 'ENCC', label: 'Elevator Non-Climate Controlled' },
+  { code: 'GLCC', label: 'Ground Level Climate Controlled' },
+  { code: 'GNCC', label: 'Ground Level Non-Climate Controlled' },
 ];
 
 interface StepFeatureCodesProps {
@@ -118,14 +114,18 @@ export function StepFeatureCodes({ featureCodes, rateRecordCount = 0, onUpdate, 
         <CardContent>
           <div className="space-y-4">
             {featureCodes.map((fc, index) => {
+              // Check if this code is N/A (needs user attention)
+              const isNA = fc.code === 'N/A' || fc.code === 'NA';
               // Check if this tag has conflicting/multiple features (indicated by + in the tag)
               const hasMultipleFeatures = fc.originalTag.includes('+');
+              // Needs attention if N/A or has multiple features
+              const needsAttention = isNA || hasMultipleFeatures;
 
               return (
                 <div
                   key={fc.originalTag}
                   className={`space-y-2 p-4 rounded-lg ${
-                    hasMultipleFeatures
+                    needsAttention
                       ? 'bg-amber-50 border border-amber-200'
                       : 'bg-muted/30'
                   }`}
@@ -133,20 +133,22 @@ export function StepFeatureCodes({ featureCodes, rateRecordCount = 0, onUpdate, 
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium">Tag {index + 1}</span>
-                      {hasMultipleFeatures && (
+                      {needsAttention && (
                         <Badge variant="outline" className="text-amber-700 border-amber-300 bg-amber-100">
-                          Multiple Features
+                          {isNA ? 'Needs Classification' : 'Multiple Features'}
                         </Badge>
                       )}
                     </div>
                     <Badge variant="secondary">{fc.count.toLocaleString()} records</Badge>
                   </div>
-                  <p className={`text-sm ${hasMultipleFeatures ? 'text-amber-800 font-medium' : 'text-muted-foreground'}`}>
+                  <p className={`text-sm ${needsAttention ? 'text-amber-800 font-medium' : 'text-muted-foreground'}`}>
                     {fc.originalTag}
                   </p>
-                  {hasMultipleFeatures && (
+                  {needsAttention && (
                     <p className="text-xs text-amber-600">
-                      This tag has multiple access types. Please select the appropriate code for these records.
+                      {isNA
+                        ? 'Could not auto-classify these records. Review the feature information above and select the appropriate code.'
+                        : 'This tag has multiple access types. Please select the appropriate code for these records.'}
                     </p>
                   )}
                   <div className="flex gap-2">

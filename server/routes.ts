@@ -796,12 +796,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
               datesByStore[storeId] = new Set();
             }
 
+            // Build features array for display
             const features: string[] = [];
             if (row.Climate_Controlled) features.push("Climate Controlled");
             if (row.Humidity_Controlled) features.push("Humidity Controlled");
             if (row.Drive_Up) features.push("Drive Up");
             if (row.Elevator) features.push("Elevator");
             if (row.Outdoor_Access) features.push("Outdoor Access");
+
+            // Also check Spacetype for additional feature hints
+            const spacetypeLower = (row.Spacetype || "").toLowerCase();
+            const hasInteriorInSpacetype = spacetypeLower.includes("interior");
+            const hasExteriorInSpacetype = spacetypeLower.includes("exterior") || spacetypeLower.includes("outside");
+            const hasGroundInSpacetype = spacetypeLower.includes("ground") || spacetypeLower.includes("1st") || spacetypeLower.includes("first");
+
+            // Determine outdoor access from multiple sources
+            const outdoorAccess = !!row.Outdoor_Access || hasExteriorInSpacetype;
 
             ratesByStore[storeId].push({
               storeId: storeId,
@@ -820,7 +830,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               humidityControlled: !!row.Humidity_Controlled,
               driveUp: !!row.Drive_Up,
               elevator: !!row.Elevator,
-              outdoorAccess: !!row.Outdoor_Access,
+              outdoorAccess: outdoorAccess,
               walkInPrice: row.Regular_Rate,
               onlinePrice: row.Online_Rate,
               pctDifference:

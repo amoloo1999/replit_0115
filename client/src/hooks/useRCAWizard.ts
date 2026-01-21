@@ -698,64 +698,25 @@ export function useRCAWizard() {
     }
   }, [state.selectedStores, state.rateRecords]);
 
-  // Get the actual features from a record as a readable string
-  const getRecordFeatures = (record: RateRecord): string => {
-    const accessTypes: string[] = [];
-    if (record.driveUp) accessTypes.push('Drive-Up');
-    if (record.elevator) accessTypes.push('Elevator');
-    if (record.outdoorAccess) accessTypes.push('Outdoor');
-
-    const climateTypes: string[] = [];
-    if (record.climateControlled) climateTypes.push('Climate');
-    if (record.humidityControlled) climateTypes.push('Humidity');
-
-    const access = accessTypes.length > 0 ? accessTypes.join('+') : 'Ground';
-    const climate = climateTypes.length > 0 ? climateTypes.join('+') : 'Non-Climate';
-
-    return `${access} / ${climate}`;
-  };
-
-  // Check if a record has conflicting amenities and return details
-  const getConflictInfo = (record: RateRecord): { hasConflict: boolean; details: string } => {
-    // Check for multiple access types (conflicting)
-    const accessTypes: string[] = [];
-    if (record.driveUp) accessTypes.push('Drive-Up');
-    if (record.elevator) accessTypes.push('Elevator');
-    if (record.outdoorAccess) accessTypes.push('Outdoor');
-
-    if (accessTypes.length > 1) {
-      return {
-        hasConflict: true,
-        details: getRecordFeatures(record),
-      };
-    }
-
-    return { hasConflict: false, details: '' };
-  };
-
-  // Build a tag classification string from record features (matches RCA_script.py logic)
-  const buildTagFromRecord = (record: RateRecord): string => {
-    // Check for conflicting amenities first - but show actual features
-    const conflictInfo = getConflictInfo(record);
-    if (conflictInfo.hasConflict) {
-      // Show actual features so user can make an informed decision
-      return conflictInfo.details;
-    }
-
+  /**
+   * Build a detailed feature description string from a rate record.
+   * This provides users with all available feature information to help them
+   * make informed decisions when classifying units that can't be auto-coded.
+   */
+  const buildFeatureDescription = (record: RateRecord): string => {
     const parts: string[] = [];
 
-    // Add access type
-    if (record.driveUp) {
-      parts.push('Drive-Up');
-    } else if (record.elevator) {
-      parts.push('Elevator');
-    } else if (record.outdoorAccess) {
-      parts.push('Outdoor');
-    } else {
+    // Access type indicators
+    if (record.driveUp) parts.push('Drive-Up');
+    if (record.elevator) parts.push('Elevator');
+    if (record.outdoorAccess) parts.push('Exterior/Outdoor');
+
+    // If none of the above, check for ground level indicators
+    if (!record.driveUp && !record.elevator && !record.outdoorAccess) {
       parts.push('Ground Level');
     }
 
-    // Add climate info
+    // Climate indicators
     if (record.climateControlled) {
       parts.push('Climate Controlled');
     } else if (record.humidityControlled) {
@@ -764,50 +725,179 @@ export function useRCAWizard() {
       parts.push('Non-Climate');
     }
 
-    // Fallback to existing tag or unitType if no features
-    if (parts.length === 0) {
-      return record.tag || record.unitType || 'Standard';
+    // Include unit type/spacetype if available for additional context
+    if (record.unitType && record.unitType !== 'Standard') {
+      parts.push(`[${record.unitType}]`);
+    }
+
+    // Include raw features string if available and different from what we parsed
+    if (record.features && !parts.some(p => record.features?.toLowerCase().includes(p.toLowerCase().split(' ')[0]))) {
+      parts.push(`(${record.features})`);
     }
 
     return parts.join(' / ');
   };
 
-  // Suggest feature code based on tag text (matches RCA_script.py suggest_feature_code)
-  const suggestFeatureCode = (featureText: string): string => {
-    if (!featureText) return 'UNKNOWN';
+  /**
+   * Determine the feature code for a record based on strict classification rules.
+   *
+   * Valid codes (only 6):
+   * - DUCC: Drive-Up Climate Controlled (drive-up + exterior + climate)
+   * - DU: Drive-Up Non-Climate (drive-up + exterior + non-climate)
+   * - ECC: Elevator Climate Controlled (elevator + interior + climate)
+   * - ENCC: Elevator Non-Climate Controlled (elevator + interior + non-climate or unknown)
+   * - GLCC: Ground Level Climate Controlled (ground/first floor + interior + climate)
+   * - GNCC: Ground Level Non-Climate Controlled (ground/first floor + interior + non-climate or unknown)
+   *
+   * Returns N/A for:
+   * - Conflicting features (drive-up + interior, elevator + exterior, etc.)
+   * - Insufficient information to determine classification
+   * - Ambiguous combinations
+   */
+  const classifyFeatureCode = (record: RateRecord): { code: string; isConflict: boolean; reason?: string } => {
+    const isDriveUp = !!record.driveUp;
+    const isElevator = !!record.elevator;
+    const isOutdoor = !!record.outdoorAccess;
+    const isClimate = !!record.climateControlled;
 
-    // Auto-code tags with multiple access types (e.g., "Drive-Up+Elevator") as NA for user review
-    if (featureText.includes('+')) {
-      return 'NA';
+    // Check for conflicting access types
+    const accessTypeCount = [isDriveUp, isElevator].filter(Boolean).length;
+
+    if (accessTypeCount > 1) {
+      // Multiple access types are conflicting
+      return {
+        code: 'N/A',
+        isConflict: true,
+        reason: 'Multiple access types (drive-up and elevator are mutually exclusive)'
+      };
     }
+
+    // Drive-Up rules: must be exterior, cannot be interior
+    if (isDriveUp) {
+      // Drive-up should always be exterior - if marked as interior or elevator, it's conflicting
+      if (isElevator) {
+        return {
+          code: 'N/A',
+          isConflict: true,
+          reason: 'Drive-up cannot have elevator access'
+        };
+      }
+      // Drive-up is valid - determine climate status
+      return {
+        code: isClimate ? 'DUCC' : 'DU',
+        isConflict: false
+      };
+    }
+
+    // Elevator rules: must be interior
+    if (isElevator) {
+      // Elevator with outdoor/exterior is conflicting
+      if (isOutdoor) {
+        return {
+          code: 'N/A',
+          isConflict: true,
+          reason: 'Elevator access should be interior, not exterior/outdoor'
+        };
+      }
+      // Elevator is valid - determine climate status (non-climate or unknown = ENCC)
+      return {
+        code: isClimate ? 'ECC' : 'ENCC',
+        isConflict: false
+      };
+    }
+
+    // Ground level rules: must be interior, first floor
+    // If no drive-up and no elevator, assume ground level
+    if (!isDriveUp && !isElevator) {
+      // Ground level with outdoor access is conflicting (should be drive-up instead)
+      if (isOutdoor) {
+        return {
+          code: 'N/A',
+          isConflict: true,
+          reason: 'Exterior/outdoor access without drive-up designation - unclear classification'
+        };
+      }
+      // Ground level interior - determine climate status (non-climate or unknown = GNCC)
+      return {
+        code: isClimate ? 'GLCC' : 'GNCC',
+        isConflict: false
+      };
+    }
+
+    // Fallback - no clear classification possible
+    return {
+      code: 'N/A',
+      isConflict: true,
+      reason: 'Insufficient feature information for classification'
+    };
+  };
+
+  /**
+   * Build a tag classification string from record features.
+   * This tag is used to group similar records and display to the user.
+   * Returns detailed feature info so users can make informed decisions.
+   */
+  const buildTagFromRecord = (record: RateRecord): string => {
+    return buildFeatureDescription(record);
+  };
+
+  /**
+   * Suggest a feature code based on the tag text.
+   * Only returns one of 6 valid codes (DUCC, DU, ECC, ENCC, GLCC, GNCC) or N/A.
+   */
+  const suggestFeatureCode = (featureText: string): string => {
+    if (!featureText) return 'N/A';
 
     const lower = featureText.toLowerCase();
 
-    // Check for climate control
-    const isClimate = lower.includes('climate') && !lower.includes('non-climate');
-
-    // Check for access type
+    // Detect feature flags from text
     const isDriveUp = lower.includes('drive');
     const isElevator = lower.includes('elevator');
-    const isGround = lower.includes('ground') || lower.includes('first floor');
-    const isInterior = lower.includes('interior');
-    const isOutdoor = lower.includes('outdoor');
+    const isOutdoor = lower.includes('outdoor') || lower.includes('exterior');
+    const isClimate = (lower.includes('climate') && !lower.includes('non-climate')) ||
+                      (lower.includes('cc') && !lower.includes('ncc') && !lower.includes('encc'));
+    const isGround = lower.includes('ground') || lower.includes('first floor') || lower.includes('1st floor');
 
-    // Determine code based on access type + climate
-    if (isDriveUp) {
-      return isClimate ? 'DUCC' : 'DU';
-    } else if (isElevator) {
-      return isClimate ? 'ECC' : 'ENCC';
-    } else if (isGround) {
-      return isClimate ? 'GLCC' : 'GNCC';
-    } else if (isInterior) {
-      return isClimate ? 'ICC' : 'INCC';
-    } else if (isOutdoor) {
-      return isClimate ? 'OCC' : 'ONC';
-    } else {
-      // Default based on climate only
-      return isClimate ? 'CC' : 'NCC';
+    // Check for conflicts
+
+    // Multiple access types = conflict
+    const accessTypes = [isDriveUp, isElevator].filter(Boolean);
+    if (accessTypes.length > 1) {
+      return 'N/A';
     }
+
+    // Drive-up classification
+    if (isDriveUp) {
+      // Drive-up should be exterior - interior is a conflict
+      // But we allow it since drive-up inherently implies exterior
+      return isClimate ? 'DUCC' : 'DU';
+    }
+
+    // Elevator classification
+    if (isElevator) {
+      // Elevator with outdoor/exterior is a conflict
+      if (isOutdoor) {
+        return 'N/A';
+      }
+      return isClimate ? 'ECC' : 'ENCC';
+    }
+
+    // Ground level classification
+    if (isGround || (!isDriveUp && !isElevator && !isOutdoor)) {
+      // Ground with outdoor that's not drive-up is ambiguous
+      if (isOutdoor && !isDriveUp) {
+        return 'N/A';
+      }
+      return isClimate ? 'GLCC' : 'GNCC';
+    }
+
+    // Outdoor without clear access type
+    if (isOutdoor) {
+      return 'N/A';
+    }
+
+    // No identifiable features = N/A
+    return 'N/A';
   };
 
   // Legacy function for backwards compatibility

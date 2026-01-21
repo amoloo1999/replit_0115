@@ -159,12 +159,24 @@ export async function fetchHistoricalData(params: {
       }
 
       // Parse feature text into binary flags
+      // Also check unit type for additional feature info
       const featureLower = (featureText || '').toLowerCase();
-      const climateControlled = featureLower.includes('climate') || featureLower.includes('cc');
-      const humidityControlled = featureLower.includes('humidity');
-      const driveUp = featureLower.includes('drive');
-      const elevator = featureLower.includes('elevator');
-      const outdoorAccess = featureLower.includes('outdoor');
+      const unitTypeLower = (unitType || '').toLowerCase();
+      const combinedText = `${featureLower} ${unitTypeLower}`;
+
+      // Climate detection - look for explicit climate indicators
+      const climateControlled = combinedText.includes('climate') ||
+        (combinedText.includes('cc') && !combinedText.includes('ncc') && !combinedText.includes('encc'));
+      const humidityControlled = combinedText.includes('humidity');
+
+      // Access type detection
+      const driveUp = combinedText.includes('drive');
+      const elevator = combinedText.includes('elevator');
+
+      // Outdoor/exterior detection - these indicate exterior access
+      const outdoorAccess = combinedText.includes('outdoor') ||
+        combinedText.includes('exterior') ||
+        (combinedText.includes('outside') && !combinedText.includes('inside'));
 
       // Parse price array
       const prices = unit.price || [];
