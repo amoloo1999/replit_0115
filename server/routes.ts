@@ -8,7 +8,7 @@ const MCP_BASE_URL = "https://mcp.wwgmcpserver.com";
 const MCP_API_KEY = process.env.WWG_MCP_API_KEY || "";
 
 // AWS S3 configuration for rate data export
-const AWS_S3_BUCKET = process.env.AWS_S3_BUCKET || "rca-rate-imports";
+const AWS_S3_BUCKET = process.env.AWS_S3_BUCKET || "get-off-replit-we-need-the-rca-data";
 const AWS_S3_REGION = process.env.AWS_S3_REGION || "us-west-1";
 const AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID || "";
 const AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY || "";
