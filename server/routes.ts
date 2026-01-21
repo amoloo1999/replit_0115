@@ -813,6 +813,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
             // Determine outdoor access from multiple sources
             const outdoorAccess = !!row.Outdoor_Access || hasExteriorInSpacetype;
 
+            // Filter out lockers, parking, and other non-standard unit types
+            const excludedTerms = ['locker', 'parking', 'wine', 'vehicle', 'rv', 'boat', 'trailer', 'car'];
+            const sizeLower = (row.Size || "").toLowerCase();
+            const isExcluded = excludedTerms.some(
+              (term) => spacetypeLower.includes(term) || sizeLower.includes(term)
+            );
+
+            if (isExcluded) {
+              continue; // Skip this record
+            }
+
             ratesByStore[storeId].push({
               storeId: storeId,
               storeName: row.Store_Name || "",

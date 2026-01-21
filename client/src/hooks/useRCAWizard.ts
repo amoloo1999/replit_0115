@@ -659,7 +659,30 @@ export function useRCAWizard() {
         }
       }
 
-      console.log(`initializeFeatureCodes: Total merged records: ${allRecords.length}`);
+      console.log(`initializeFeatureCodes: Total merged records before filtering: ${allRecords.length}`);
+
+      // Filter out lockers, parking, and other non-standard unit types
+      const excludedUnitTypes = ['locker', 'parking', 'wine', 'vehicle', 'rv', 'boat', 'trailer', 'car'];
+      const filteredRecords = allRecords.filter((record) => {
+        const unitTypeLower = (record.unitType || '').toLowerCase();
+        const sizeLower = (record.size || '').toLowerCase();
+        const featuresLower = (record.features || '').toLowerCase();
+
+        // Check if any excluded term appears in unitType, size, or features
+        const isExcluded = excludedUnitTypes.some(
+          (term) =>
+            unitTypeLower.includes(term) ||
+            sizeLower.includes(term) ||
+            featuresLower.includes(term)
+        );
+
+        return !isExcluded;
+      });
+
+      console.log(`initializeFeatureCodes: Filtered to ${filteredRecords.length} records (excluded ${allRecords.length - filteredRecords.length} lockers/parking/etc.)`);
+
+      // Update allRecords to use filtered set
+      allRecords = filteredRecords;
 
       // Extract unique tags and count occurrences
       // Build tag from features similar to RCA_script.py build_tag_from_db_fields
