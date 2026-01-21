@@ -415,8 +415,9 @@ export function useRCAWizard() {
       const result = await getTrailing12MonthRates({ storeIds });
 
       // Calculate gaps based on actual data coverage
+      // Use String() to ensure key lookup works regardless of type (JSON keys are strings)
       const gaps: DateGap[] = state.selectedStores.map((store) => {
-        const dates = result.datesByStore[store.storeId] || [];
+        const dates = result.datesByStore[store.storeId] || result.datesByStore[String(store.storeId)] || [];
         const totalExpectedDays = 365;
         const actualDays = dates.length;
         const missingDays = Math.max(0, totalExpectedDays - actualDays);
@@ -628,13 +629,18 @@ export function useRCAWizard() {
       // Also fetch from database to ensure we have complete coverage
       const result = await getTrailing12MonthRates({ storeIds });
 
-      // Collect database records
+      // Collect database records - iterate over all keys in ratesByStore to avoid type mismatches
+      // (keys may be strings after JSON parsing even though storeIds are numbers)
       const dbRecords: RateRecord[] = [];
-      for (const storeId of storeIds) {
-        const storeRecords = result.ratesByStore[storeId] || result.ratesByStore[String(storeId)] || [];
+      const ratesByStoreKeys = Object.keys(result.ratesByStore || {});
+      console.log(`initializeFeatureCodes: ratesByStore has ${ratesByStoreKeys.length} store keys:`, ratesByStoreKeys);
+
+      for (const key of ratesByStoreKeys) {
+        const storeRecords = result.ratesByStore[key] || [];
+        console.log(`initializeFeatureCodes: Store ${key} has ${storeRecords.length} records`);
         dbRecords.push(...storeRecords);
       }
-      console.log(`initializeFeatureCodes: Fetched ${dbRecords.length} records from database`);
+      console.log(`initializeFeatureCodes: Fetched ${dbRecords.length} total records from database`);
 
       // Merge: API records take precedence, add DB records that don't exist in API set
       // Build a set of keys from existing records for deduplication
